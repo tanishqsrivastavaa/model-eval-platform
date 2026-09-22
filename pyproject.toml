@@ -1,0 +1,17 @@
+[project]
+name = "agent-xray"
+version = "0.1.0"
+description = "Watch LLM agents think, call tools, and burn time — live."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "playwright>=1.45"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

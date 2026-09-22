@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.env
+data/
+node_modules/
+web/dist/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+*.tsbuildinfo
+.pytest_cache/
+.ruff_cache/
