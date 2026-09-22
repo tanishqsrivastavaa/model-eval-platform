@@ -1,1 +1,291 @@
 @import "tailwindcss";
+@import "./styles/tokens.css";
+
+@theme inline {
+  --color-page: var(--page);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-inset: var(--inset);
+  --color-hair: var(--hairline);
+  --color-hair-strong: var(--hairline-strong);
+
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-muted: var(--fg-3);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-wait: var(--stream-wait);
+  --color-think: var(--stream-think);
+  --color-textstream: var(--stream-text);
+  --color-args: var(--stream-args);
+  --color-tool: var(--stream-tool);
+  --color-fail: var(--stream-fail);
+  --color-on-fail: var(--on-fail);
+
+  --font-mono: var(--font-mono-stack);
+  --font-sans: var(--font-sans-stack);
+
+  --ease-instrument: var(--ease);
+}
+
+@layer base {
+  *,
+  ::file-selector-button {
+    box-sizing: border-box;
+    border: 0 solid var(--hairline);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--fg);
+    font-family: var(--font-sans-stack);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    font-weight: 600;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button,
+  input,
+  select,
+  textarea,
+  summary {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    cursor: default;
+  }
+
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-mono-stack);
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--fg);
+  }
+
+  /* styled scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--fg) 18%, transparent) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--fg) 14%, transparent);
+    background-clip: padding-box;
+    border: 3px solid transparent;
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--fg) 24%, transparent);
+    background-clip: padding-box;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+/* ——— keyframes ——— */
+
+@keyframes pulse-live {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes trace-grow {
+  0% {
+    width: 0%;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  45% {
+    width: var(--w, 70%);
+    opacity: 1;
+  }
+  88% {
+    width: var(--w, 70%);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    width: var(--w, 70%);
+    opacity: 0;
+  }
+}
+
+/* ——— component utilities ——— */
+
+.pulse-live {
+  animation: pulse-live 1s var(--ease) infinite;
+}
+
+.anim-enter {
+  animation: enter-up var(--dur-slow) var(--ease) both;
+}
+
+.overlay-in {
+  animation: overlay-in var(--dur-fast) var(--ease) both;
+}
+
+.dialog-in {
+  animation: dialog-in var(--dur) var(--ease) both;
+}
+
+.toast-in {
+  animation: toast-in var(--dur) var(--ease) both;
+}
+
+.trace-bar {
+  width: var(--w, 70%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .trace-bar {
+    animation: trace-grow 4s var(--ease) infinite both;
+  }
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.4em;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--raised);
+  font-family: var(--font-mono-stack);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--fg-2);
+}
+
+.label {
+  font-family: var(--font-sans-stack);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.mono-data {
+  font-family: var(--font-mono-stack);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* reduced motion — gate everything, end-states are static-correct */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

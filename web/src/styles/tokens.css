@@ -1,0 +1,94 @@
+/* agent-xray design tokens — "Dark precision instrument"
+   Single cyan accent for live/interactive; harmonized stream colors; full light swap. */
+
+:root {
+  color-scheme: dark;
+
+  /* surfaces — near-black layered depth */
+  --page: #09090b;
+  --panel: #111113;
+  --raised: #18181b;
+  --inset: #0c0c0e;
+  --hairline: rgb(255 255 255 / 8%);
+  --hairline-strong: rgb(255 255 255 / 14%);
+
+  /* ink — four levels */
+  --fg: #f4f4f5;
+  --fg-2: #a1a1aa;
+  --fg-3: #71717a;
+
+  /* the one luminous accent */
+  --accent: #7dd3fc;
+  --accent-fg: #051018;
+  --accent-soft: rgb(125 211 252 / 12%);
+  --accent-ring: color-mix(in srgb, var(--accent) 50%, transparent);
+
+  /* semantic stream colors */
+  --stream-wait: #3f3f46;
+  --stream-think: #a78bfa;
+  --stream-text: #60a5fa;
+  --stream-args: #f5b544;
+  --stream-tool: #34d399;
+  --stream-fail: #f87171;
+  --on-fail: #2a0707;
+
+  /* status aliases */
+  --status-running: var(--accent);
+  --status-completed: var(--stream-tool);
+  --status-error: var(--stream-fail);
+  --status-interrupted: var(--stream-fail);
+  --status-cancelled: var(--stream-args);
+  --status-max_turns: var(--stream-args);
+
+  /* geometry */
+  --radius: 8px;
+  --radius-sm: 6px;
+
+  /* type */
+  --font-mono-stack: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans-stack: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+
+  /* depth — subtle, borders-first on dark */
+  --shadow-sm: 0 0 0 1px rgb(255 255 255 / 4%);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 35%);
+  --shadow-lg: 0 16px 48px rgb(0 0 0 / 45%);
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --dur-fast: 150ms;
+  --dur: 200ms;
+  --dur-slow: 250ms;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --page: #f6f7f9;
+  --panel: #ffffff;
+  --raised: #eef0f3;
+  --inset: #eef0f3;
+  --hairline: #e4e4e7;
+  --hairline-strong: #d4d4d8;
+
+  --fg: #111113;
+  --fg-2: #52525b;
+  --fg-3: #8b8b93;
+
+  --accent: #0369a1;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(3 105 161 / 10%);
+  --accent-ring: color-mix(in srgb, var(--accent) 50%, transparent);
+
+  --stream-wait: #cfd4dc;
+  --stream-think: #7c3aed;
+  --stream-text: #2563eb;
+  --stream-args: #d97706;
+  --stream-tool: #059669;
+  --stream-fail: #dc2626;
+  --on-fail: #ffffff;
+
+  --shadow-sm: 0 0 0 1px rgb(0 0 0 / 4%);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 10%);
+  --shadow-lg: 0 16px 48px rgb(0 0 0 / 14%);
+}
