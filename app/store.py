@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sqlite3
+import threading
 import time
 from collections import defaultdict
 
@@ -40,43 +41,67 @@ class Store:
         self.db.execute("UPDATE runs SET status='interrupted' WHERE status='running'")
         self.db.commit()
         self.subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
+        self.lock = threading.Lock()
 
     def create_run(self, run_id: str, provider: str, model: str, prompt: str, config: dict) -> None:
-        self.db.execute(
-            "INSERT INTO runs (id, created_at, provider, model, prompt, config, status) VALUES (?,?,?,?,?,?,?)",
-            (run_id, time.time(), provider, model, prompt, json.dumps(config), "running"),
-        )
-        self.db.commit()
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO runs (id, created_at, provider, model, prompt, config, status) VALUES (?,?,?,?,?,?,?)",
+                (run_id, time.time(), provider, model, prompt, json.dumps(config), "running"),
+            )
+            self.db.commit()
 
     def finish_run(self, run_id: str, status: str, summary: dict) -> None:
-        self.db.execute("UPDATE runs SET status=?, summary=? WHERE id=?", (status, json.dumps(summary), run_id))
-        self.db.commit()
+        with self.lock:
+            self.db.execute("UPDATE runs SET status=?, summary=? WHERE id=?", (status, json.dumps(summary), run_id))
+            self.db.commit()
 
     def add_event(self, run_id: str, event: dict) -> None:
-        self.db.execute(
-            "INSERT INTO events (run_id, seq, t_ms, type, data) VALUES (?,?,?,?,?)",
-            (run_id, event["seq"], event["t_ms"], event["type"], json.dumps(event["data"])),
-        )
-        self.db.commit()
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO events (run_id, seq, t_ms, type, data) VALUES (?,?,?,?,?)",
+                (run_id, event["seq"], event["t_ms"], event["type"], json.dumps(event["data"])),
+            )
+            self.db.commit()
         for q in self.subscribers.get(run_id, ()):
             q.put_nowait(event)
 
     def events(self, run_id: str) -> list[dict]:
-        rows = self.db.execute("SELECT seq, t_ms, type, data FROM events WHERE run_id=? ORDER BY seq", (run_id,))
-        return [{"seq": r["seq"], "t_ms": r["t_ms"], "type": r["type"], "data": json.loads(r["data"])} for r in rows]
+        with self.lock:
+            rows = self.db.execute("SELECT seq, t_ms, type, data FROM events WHERE run_id=? ORDER BY seq", (run_id,))
+            return [
+                {"seq": r["seq"], "t_ms": r["t_ms"], "type": r["type"], "data": json.loads(r["data"])}
+                for r in rows
+            ]
 
     def get_run(self, run_id: str) -> dict | None:
-        row = self.db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        with self.lock:
+            row = self.db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         return self._run_dict(row) if row else None
 
-    def list_runs(self, limit: int = 100) -> list[dict]:
-        rows = self.db.execute("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,))
-        return [self._run_dict(r) for r in rows]
+    def list_runs(self, q: str | None = None, status: str | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
+        where, params = [], []
+        if q:
+            pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            where.append("(prompt LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')")
+            params.extend([pattern, pattern])
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        sql = "SELECT * FROM runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self.lock:
+            rows = self.db.execute(sql, params)
+            return [self._run_dict(r) for r in rows]
 
     def delete_run(self, run_id: str) -> None:
-        self.db.execute("DELETE FROM events WHERE run_id=?", (run_id,))
-        self.db.execute("DELETE FROM runs WHERE id=?", (run_id,))
-        self.db.commit()
+        with self.lock:
+            self.db.execute("DELETE FROM events WHERE run_id=?", (run_id,))
+            self.db.execute("DELETE FROM runs WHERE id=?", (run_id,))
+            self.db.commit()
 
     @staticmethod
     def _run_dict(row: sqlite3.Row) -> dict:

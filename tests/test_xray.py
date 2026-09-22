@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -160,3 +161,188 @@ def test_injected_failures_reach_the_model_as_errors(server):
 def test_rejects_unconfigured_provider(server):
     r = httpx.post(f"{server}/api/runs", json={"provider": "nope", "model": "x", "prompt": "hi"})
     assert r.status_code == 400
+
+
+# ---------- filtering, pagination, events, cancel, delete, store concurrency ----------
+
+def test_runs_list_filters_by_q_and_status(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "distinctive walrus prompt",
+    }).json()["id"]
+
+    only = httpx.get(f"{server}/api/runs", params={"q": "walrus"}).json()
+    assert {r["id"] for r in only} == {run_id}
+
+    by_model = httpx.get(f"{server}/api/runs", params={"q": "fake-agent"}).json()
+    assert run_id in [r["id"] for r in by_model]
+
+    read_stream(server, run_id)
+
+    completed = httpx.get(f"{server}/api/runs", params={"status": "completed"}).json()
+    assert run_id in [r["id"] for r in completed]
+    assert httpx.get(f"{server}/api/runs", params={"status": "no-such-status"}).json() == []
+
+    combined = httpx.get(f"{server}/api/runs", params={"q": "walrus", "status": "completed"}).json()
+    assert run_id in [r["id"] for r in combined]
+    assert httpx.get(f"{server}/api/runs", params={"q": "walrus", "status": "running"}).json() == []
+
+
+def test_runs_list_q_escapes_like_wildcards(server):
+    def make(prompt: str) -> str:
+        return httpx.post(f"{server}/api/runs", json={
+            "provider": "fake", "model": "fake-agent", "prompt": prompt,
+        }).json()["id"]
+
+    zebra = make("zebra question")
+    pct = make("progress 100% done")
+    make("score 100 points")
+
+    def ids(q: str) -> set[str]:
+        return {r["id"] for r in httpx.get(f"{server}/api/runs", params={"q": q}).json()}
+
+    assert zebra in ids("zebra")
+    assert zebra in ids("ZEBRA QUESTION")  # LIKE is case-insensitive for ASCII
+    assert ids("zebra_que") == set()       # underscore escaped: no literal zebra_que exists
+    assert ids("100%") == {pct}            # percent escaped: literal "100%" only
+    assert ids("%") == {pct}
+    assert ids("'") == set()
+
+
+def test_runs_list_pagination_and_validation(server):
+    created = [
+        httpx.post(f"{server}/api/runs", json={
+            "provider": "fake", "model": "fake-agent", "prompt": f"page test {i}",
+        }).json()["id"]
+        for i in range(3)
+    ]
+
+    everything = httpx.get(f"{server}/api/runs", params={"limit": 500}).json()
+    assert 3 <= len(everything) <= 500
+    assert set(created) <= {r["id"] for r in everything}
+
+    assert httpx.get(f"{server}/api/runs", params={"limit": 2, "offset": 1}).json() == everything[1:3]
+    assert httpx.get(f"{server}/api/runs", params={"limit": 0}).json() == []
+    assert httpx.get(f"{server}/api/runs", params={"offset": 10**6}).json() == []
+    # Negatives are clamped to 0 (limit=0 → empty), not treated as unlimited.
+    assert httpx.get(f"{server}/api/runs", params={"limit": -5, "offset": -1}).json() == []
+    assert httpx.get(f"{server}/api/runs", params={"limit": "abc"}).status_code == 422
+    r = httpx.get(f"{server}/api/runs")
+    assert r.status_code == 200 and isinstance(r.json(), list)
+
+
+def test_run_events_endpoint_matches_stream_replay(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "go",
+    }).json()["id"]
+    events = read_stream(server, run_id)
+
+    r = httpx.get(f"{server}/api/runs/{run_id}/events")
+    assert r.status_code == 200
+    assert "application/json" in r.headers["content-type"]
+    body = r.json()
+    assert body == events
+    assert [e["seq"] for e in body] == list(range(1, len(body) + 1))
+
+
+def test_run_events_endpoint_404s_for_unknown_run(server):
+    assert httpx.get(f"{server}/api/runs/no-such-run/events").status_code == 404
+
+
+def test_cancel_running_run_reports_cancelled(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "go",
+    }).json()["id"]
+    r = httpx.post(f"{server}/api/runs/{run_id}/cancel")
+    assert r.status_code == 200 and r.json() == {"cancelled": True}
+
+    events = read_stream(server, run_id)
+    assert events[-1]["type"] == "run_finished"
+    assert events[-1]["data"]["status"] == "cancelled"
+    assert httpx.get(f"{server}/api/runs/{run_id}").json()["status"] == "cancelled"
+
+
+def test_cancel_finished_and_unknown_run_report_false(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "go",
+    }).json()["id"]
+    read_stream(server, run_id)
+    time.sleep(0.3)  # let the done-callback drop the task from `tasks`
+    assert httpx.post(f"{server}/api/runs/{run_id}/cancel").json() == {"cancelled": False}
+    assert httpx.post(f"{server}/api/runs/no-such-run/cancel").json() == {"cancelled": False}
+
+
+def test_store_serializes_concurrent_db_access(tmp_path, monkeypatch):
+    import app.store as store_mod
+
+    monkeypatch.setattr(store_mod, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(store_mod, "DB_PATH", tmp_path / "concurrent.db")
+    from app.store import Store
+
+    st = Store()
+    errors: list[Exception] = []
+
+    def worker(tid: int) -> None:
+        try:
+            for j in range(20):
+                rid = f"run-{tid}-{j}"
+                st.create_run(rid, "fake", "fake-agent", f"prompt {tid} {j}", {"n": j})
+                st.add_event(rid, {"seq": 1, "t_ms": 0.0, "type": "run_started", "data": {}})
+                st.get_run(rid)
+                st.events(rid)
+                st.finish_run(rid, "completed", {"ok": True})
+                if j % 2 == 0:
+                    st.delete_run(rid)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    rows = st.list_runs(limit=1000)
+    assert len(rows) == 40  # 4×20 created, every even j (10/thread) deleted
+    assert all(r["status"] == "completed" for r in rows)
+
+
+def test_create_run_persists_normalized_config(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "go",
+        "max_turns": 999, "unknown_field": "nope",
+    }).json()["id"]
+    read_stream(server, run_id)  # don't leave the server mid-run
+
+    cfg = httpx.get(f"{server}/api/runs/{run_id}").json()["config"]
+    assert cfg["max_turns"] == 50
+    assert "unknown_field" not in cfg
+    assert cfg["system"]
+    assert cfg["temperature"] is None
+    assert cfg["max_tokens"] is None
+    assert cfg["reasoning_effort"] is None
+    assert set(cfg["tools"]) == {"list_files", "read_file", "write_file", "run_python", "fetch_url", "calculator"}
+
+
+def test_delete_unknown_run_returns_404(server):
+    assert httpx.delete(f"{server}/api/runs/no-such-run").status_code == 404
+
+
+def test_delete_live_run_conflicts_409(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "go",
+    }).json()["id"]
+    assert httpx.delete(f"{server}/api/runs/{run_id}").status_code == 409
+    read_stream(server, run_id)  # let it finish; don't leave the server mid-run
+
+
+def test_delete_finished_run_removes_it(server):
+    run_id = httpx.post(f"{server}/api/runs", json={
+        "provider": "fake", "model": "fake-agent", "prompt": "go",
+    }).json()["id"]
+    read_stream(server, run_id)
+    time.sleep(0.3)  # let the done-callback drop the task from `tasks`
+    r = httpx.delete(f"{server}/api/runs/{run_id}")
+    assert r.status_code == 200 and r.json() == {"deleted": run_id}
+    assert httpx.get(f"{server}/api/runs/{run_id}").status_code == 404
+    assert httpx.delete(f"{server}/api/runs/{run_id}").status_code == 404

@@ -4,7 +4,7 @@ import asyncio
 import json
 import shutil
 import uuid
-from dataclasses import fields
+from dataclasses import asdict, fields
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -61,7 +61,7 @@ async def create_run(body: dict) -> dict:
     cfg.max_turns = max(1, min(int(cfg.max_turns), 50))
 
     run_id = uuid.uuid4().hex[:12]
-    store.create_run(run_id, cfg.provider, cfg.model, cfg.prompt, body)
+    store.create_run(run_id, cfg.provider, cfg.model, cfg.prompt, asdict(cfg))
     task = asyncio.create_task(run_agent(store, p, cfg, run_id))
     tasks[run_id] = task
     task.add_done_callback(lambda _: tasks.pop(run_id, None))
@@ -69,8 +69,10 @@ async def create_run(body: dict) -> dict:
 
 
 @app.get("/api/runs")
-def runs() -> list[dict]:
-    return store.list_runs()
+def runs(q: str | None = None, status: str | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
+    limit = max(0, min(limit, 500))
+    offset = max(0, offset)
+    return store.list_runs(q=q, status=status, limit=limit, offset=offset)
 
 
 @app.get("/api/runs/{run_id}")
@@ -81,8 +83,15 @@ def run(run_id: str) -> dict:
     return r
 
 
+@app.get("/api/runs/{run_id}/events")
+def run_events(run_id: str) -> list[dict]:
+    if not store.get_run(run_id):
+        raise HTTPException(404)
+    return store.events(run_id)
+
+
 @app.post("/api/runs/{run_id}/cancel")
-def cancel(run_id: str) -> dict:
+async def cancel(run_id: str) -> dict:
     task = tasks.get(run_id)
     if task:
         task.cancel()
@@ -93,6 +102,8 @@ def cancel(run_id: str) -> dict:
 def delete(run_id: str) -> dict:
     if run_id in tasks:
         raise HTTPException(409, "run is still live; cancel it first")
+    if not store.get_run(run_id):
+        raise HTTPException(404)
     store.delete_run(run_id)
     shutil.rmtree(WORKSPACES_DIR / run_id, ignore_errors=True)
     return {"deleted": run_id}
@@ -134,9 +145,29 @@ async def stream(run_id: str) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
-app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+# Legacy static assets stay reachable at /static/* during the SPA migration.
+if (ROOT / "static").is_dir():
+    app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+DIST = ROOT / "web" / "dist"
+if (DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
 
 
-@app.get("/")
-def index() -> FileResponse:
+@app.get("/{full_path:path}")
+def spa(full_path: str) -> FileResponse:
+    """SPA fallback. Registered last so every /api route wins."""
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(404)
+    if full_path:
+        for base in (DIST, ROOT / "static"):
+            candidate = base / full_path
+            try:
+                candidate.resolve().relative_to(base.resolve())
+            except ValueError:
+                continue
+            if candidate.is_file():
+                return FileResponse(candidate)
+    if (DIST / "index.html").is_file():
+        return FileResponse(DIST / "index.html")
     return FileResponse(ROOT / "static" / "index.html")
