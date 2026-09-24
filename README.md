@@ -30,3 +30,4 @@ make test-e2e   # playwright browser
 - [ ] Canvas waterfall timeline with zoom/pan
 - [ ] Command palette, shortcuts, searchable history
 - [ ] Run comparison, evals, auth, hosted deploy (future)
+
